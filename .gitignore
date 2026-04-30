@@ -23,6 +23,7 @@ Thumbs.db
 # Logs and local reports
 *.log
 system_report.json
+install_report.json
 
 # YOLO and model artifacts
 *.pt
@@ -41,8 +42,11 @@ runs/
 
 # Generated deployment files
 open_yolo_env.bat
+open_in_pycharm.bat
+run_test_yolo.bat
 test_yolo.py
 test_camera.py
 test_realsense.py
 export_onnx.py
 requirements_yolo.txt
+downloads/

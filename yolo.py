@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 # ============================================================
-# Windows + 完整 Anaconda + YOLO 工程部署脚本 V3
+# Windows + 完整 Anaconda + YOLO + PyCharm 工程部署脚本 V4
 # ============================================================
 # V2 改进点：
 # 1. 新增统一硬件依赖组 HARDWARE_PACKAGES：pyserial + pyrealsense2
@@ -12,9 +12,10 @@
 # 7. pip install 增加 --default-timeout=1000，降低大 wheel 下载超时概率
 # 8. subprocess 输出解码增加 encoding='utf-8' 和 errors='replace'，防止 Emoji/特殊字符导致崩溃
 # 9. test_realsense.py 增加固件匹配和 RealSense Viewer 校验提醒
+# 10. 新增 PyCharm Community 安装选项，并生成 .idea 项目配置
 #
 # 运行：
-#     python yolo_anaconda_full_deployer_v3.py
+#     python yolo.py
 # ============================================================
 
 import os
@@ -29,6 +30,7 @@ import subprocess
 import urllib.request
 from pathlib import Path
 from datetime import datetime
+from xml.sax.saxutils import escape as xml_escape
 
 CONDA_ENV_NAME = "yolo"
 CONDA_PYTHON_VERSION = "3.10"
@@ -40,6 +42,8 @@ DEFAULT_PROJECT_DIR = r"C:\Users\Public\YOLO_Anaconda_Deploy"
 TUNA_ANACONDA_ARCHIVE_URL = "https://mirrors.tuna.tsinghua.edu.cn/anaconda/archive/"
 OFFICIAL_ANACONDA_ARCHIVE_URL = "https://repo.anaconda.com/archive/"
 ANACONDA_FALLBACK_FILE = "Anaconda3-2025.12-2-Windows-x86_64.exe"
+JETBRAINS_RELEASES_API = "https://data.services.jetbrains.com/products/releases?code=PCC&latest=true&type=release"
+DEFAULT_PYCHARM_DIR = r"C:\Users\Public\PyCharm_Community"
 
 DOWNLOAD_RETRIES = 3
 DOWNLOAD_RETRY_SLEEP = 5
@@ -357,6 +361,26 @@ def get_latest_anaconda_installer():
     return TUNA_ANACONDA_ARCHIVE_URL + ANACONDA_FALLBACK_FILE, ANACONDA_FALLBACK_FILE
 
 
+def get_latest_pycharm_installer():
+    print_step("从 JetBrains 官方接口解析最新 PyCharm Community Windows 安装包")
+    text = urlopen_text_with_retry(JETBRAINS_RELEASES_API)
+    data = json.loads(text)
+    releases = data.get("PCC") or []
+    if not releases:
+        raise RuntimeError("未从 JetBrains 官方接口解析到 PyCharm Community 版本。")
+
+    release = releases[0]
+    downloads = release.get("downloads", {})
+    windows = downloads.get("windows") or downloads.get("windowsZip") or {}
+    url = windows.get("link")
+    if not url:
+        raise RuntimeError("未从 JetBrains 官方接口解析到 Windows 安装包下载地址。")
+
+    filename = url.rstrip("/").split("/")[-1] or "pycharm-community-installer.exe"
+    print("解析到 PyCharm Community：" + str(release.get("version", "latest")))
+    return url, filename
+
+
 def download_file_with_retry(url, dst):
     dst = Path(dst)
     dst.parent.mkdir(parents=True, exist_ok=True)
@@ -518,6 +542,103 @@ def ensure_conda(project_dir):
     if conda_bat.exists():
         return conda_bat
     raise RuntimeError("Anaconda 安装后未找到 conda，请检查安装目录。")
+
+
+def find_existing_pycharm():
+    names = ["pycharm64.exe", "pycharm.exe"]
+    for name in names:
+        p = which(name)
+        if p:
+            return Path(p)
+
+    candidates = []
+    roots = [
+        Path("C:/Program Files/JetBrains"),
+        Path("C:/Program Files (x86)/JetBrains"),
+        Path.home() / "AppData" / "Local" / "Programs",
+        Path(DEFAULT_PYCHARM_DIR),
+    ]
+    for root in roots:
+        try:
+            if root.exists():
+                for exe_name in names:
+                    candidates.extend(root.glob("PyCharm*/bin/" + exe_name))
+                    candidates.extend(root.glob("*/PyCharm*/bin/" + exe_name))
+                for exe_name in names:
+                    direct = root / "bin" / exe_name
+                    if direct.exists():
+                        candidates.append(direct)
+        except Exception:
+            pass
+
+    for c in candidates:
+        try:
+            if c.exists():
+                return c.resolve()
+        except Exception:
+            pass
+    return None
+
+
+def choose_pycharm_option():
+    print_title("PyCharm 安装 / 项目配置")
+    print("1. 配置 PyCharm 项目文件，若已安装 PyCharm 则生成打开脚本")
+    print("2. 下载并安装 PyCharm Community，然后配置项目文件")
+    print("3. 跳过 PyCharm")
+    c = input("请选择 [1/2/3]，默认 1：\n> ").strip() or "1"
+    if c == "2":
+        return "install"
+    if c == "3":
+        return "skip"
+    return "configure"
+
+
+def install_pycharm_community(project_dir):
+    url, installer_name = get_latest_pycharm_installer()
+    installer_path = Path(project_dir) / "downloads" / installer_name
+    download_file_with_retry(url, installer_path)
+
+    install_dir = choose_clean_dir("选择 PyCharm Community 安装目录", DEFAULT_PYCHARM_DIR)
+    install_dir.parent.mkdir(parents=True, exist_ok=True)
+
+    print_step("静默安装 PyCharm Community")
+    print("安装包：" + str(installer_path))
+    print("安装目录：" + str(install_dir))
+    print("继续安装表示你同意 JetBrains PyCharm Community 许可条款。")
+
+    run_cmd([str(installer_path), "/S", "/D=" + str(install_dir)])
+
+    exe = install_dir / "bin" / "pycharm64.exe"
+    if exe.exists():
+        return exe
+    exe = install_dir / "bin" / "pycharm.exe"
+    if exe.exists():
+        return exe
+    return find_existing_pycharm()
+
+
+def setup_pycharm(project_dir, pycharm_option):
+    if pycharm_option == "skip":
+        return None
+
+    print_title("配置 PyCharm")
+    pycharm_exe = find_existing_pycharm()
+    if pycharm_exe:
+        print("检测到 PyCharm：" + str(pycharm_exe))
+        if pycharm_option != "install":
+            return pycharm_exe
+
+    if pycharm_option == "install":
+        try:
+            return install_pycharm_community(project_dir)
+        except Exception as e:
+            print("PyCharm 安装失败，但 YOLO 环境会继续完成。")
+            print("错误：" + str(e))
+            return pycharm_exe
+
+    if not pycharm_exe:
+        print("未检测到 PyCharm。将只生成 .idea 项目配置；安装 PyCharm 后可直接打开项目目录。")
+    return pycharm_exe
 
 
 def conda_cmd(conda_path, args, check=True, capture=False):
@@ -702,8 +823,121 @@ def choose_model():
     return desc, model_name
 
 
-def write_project_files(project_dir, conda_path, env_python, model_name, torch_backend, pypi_source, sys_report):
-    print_step("生成测试脚本、启动脚本、环境记录")
+def write_pycharm_project_files(project_dir, env_python, pycharm_exe):
+    project_dir = Path(project_dir)
+    idea_dir = project_dir / ".idea"
+    run_dir = idea_dir / "runConfigurations"
+    inspection_dir = idea_dir / "inspectionProfiles"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    inspection_dir.mkdir(parents=True, exist_ok=True)
+
+    module_name = PROJECT_NAME
+    sdk_name = "Python {} ({})".format(CONDA_PYTHON_VERSION, CONDA_ENV_NAME)
+    env_python_text = xml_escape(str(env_python))
+    sdk_name_text = xml_escape(sdk_name)
+    module_name_text = xml_escape(module_name)
+
+    misc_xml = '''<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="Black">
+    <option name="sdkName" value="{sdk_name}" />
+  </component>
+  <component name="ProjectRootManager" version="2" project-jdk-name="{sdk_name}" project-jdk-type="Python SDK" />
+</project>
+'''.format(sdk_name=sdk_name_text)
+
+    modules_xml = '''<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="ProjectModuleManager">
+    <modules>
+      <module fileurl="file://$PROJECT_DIR$/.idea/{module_name}.iml" filepath="$PROJECT_DIR$/.idea/{module_name}.iml" />
+    </modules>
+  </component>
+</project>
+'''.format(module_name=module_name_text)
+
+    iml_xml = '''<?xml version="1.0" encoding="UTF-8"?>
+<module type="PYTHON_MODULE" version="4">
+  <component name="NewModuleRootManager">
+    <content url="file://$MODULE_DIR$/..">
+      <excludeFolder url="file://$MODULE_DIR$/../runs" />
+      <excludeFolder url="file://$MODULE_DIR$/../downloads" />
+    </content>
+    <orderEntry type="jdk" jdkName="{sdk_name}" jdkType="Python SDK" />
+    <orderEntry type="sourceFolder" forTests="false" />
+  </component>
+</module>
+'''.format(sdk_name=sdk_name_text)
+
+    profiles_xml = '''<component name="InspectionProjectProfileManager">
+  <settings>
+    <option name="USE_PROJECT_PROFILE" value="false" />
+    <version value="1.0" />
+  </settings>
+</component>
+'''
+
+    run_test_yolo_xml = '''<component name="ProjectRunConfigurationManager">
+  <configuration default="false" name="Run test_yolo" type="PythonConfigurationType" factoryName="Python">
+    <module name="{module_name}" />
+    <option name="INTERPRETER_OPTIONS" value="" />
+    <option name="PARENT_ENVS" value="true" />
+    <envs />
+    <option name="SDK_HOME" value="{env_python}" />
+    <option name="WORKING_DIRECTORY" value="$PROJECT_DIR$" />
+    <option name="IS_MODULE_SDK" value="false" />
+    <option name="ADD_CONTENT_ROOTS" value="true" />
+    <option name="ADD_SOURCE_ROOTS" value="true" />
+    <option name="SCRIPT_NAME" value="$PROJECT_DIR$/test_yolo.py" />
+    <option name="PARAMETERS" value="" />
+    <method v="2" />
+  </configuration>
+</component>
+'''.format(module_name=module_name_text, env_python=env_python_text)
+
+    export_onnx_xml = '''<component name="ProjectRunConfigurationManager">
+  <configuration default="false" name="Export ONNX" type="PythonConfigurationType" factoryName="Python">
+    <module name="{module_name}" />
+    <option name="INTERPRETER_OPTIONS" value="" />
+    <option name="PARENT_ENVS" value="true" />
+    <envs />
+    <option name="SDK_HOME" value="{env_python}" />
+    <option name="WORKING_DIRECTORY" value="$PROJECT_DIR$" />
+    <option name="IS_MODULE_SDK" value="false" />
+    <option name="ADD_CONTENT_ROOTS" value="true" />
+    <option name="ADD_SOURCE_ROOTS" value="true" />
+    <option name="SCRIPT_NAME" value="$PROJECT_DIR$/export_onnx.py" />
+    <option name="PARAMETERS" value="" />
+    <method v="2" />
+  </configuration>
+</component>
+'''.format(module_name=module_name_text, env_python=env_python_text)
+
+    (idea_dir / "misc.xml").write_text(misc_xml, encoding="utf-8")
+    (idea_dir / "modules.xml").write_text(modules_xml, encoding="utf-8")
+    (idea_dir / (module_name + ".iml")).write_text(iml_xml, encoding="utf-8")
+    (inspection_dir / "Project_Default.xml").write_text(profiles_xml, encoding="utf-8")
+    (run_dir / "Run_test_yolo.xml").write_text(run_test_yolo_xml, encoding="utf-8")
+    (run_dir / "Export_ONNX.xml").write_text(export_onnx_xml, encoding="utf-8")
+
+    if pycharm_exe:
+        open_pycharm_bat = '''@echo off
+chcp 65001 >nul
+start "" "{pycharm_exe}" "{project_dir}"
+'''.format(pycharm_exe=str(pycharm_exe), project_dir=str(project_dir))
+    else:
+        open_pycharm_bat = '''@echo off
+chcp 65001 >nul
+echo 未检测到 PyCharm。请先安装 PyCharm Community，然后在 PyCharm 中打开：
+echo {project_dir}
+pause
+'''.format(project_dir=str(project_dir))
+
+    (project_dir / "open_in_pycharm.bat").write_text(open_pycharm_bat, encoding="utf-8")
+
+
+def write_project_files(project_dir, conda_path, env_python, model_name, torch_backend, pypi_source, sys_report, pycharm_exe=None):
+    print_step("生成测试脚本、启动脚本、PyCharm 项目配置、环境记录")
 
     project_dir = Path(project_dir)
 
@@ -829,7 +1063,7 @@ pause
 '''.format(project_dir=str(project_dir), env_python=str(env_python))
 
     requirements = []
-    requirements.append("# YOLO Anaconda full deployment V3")
+    requirements.append("# YOLO Anaconda full deployment V4")
     requirements.append("# generated at " + datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
     requirements.append("# conda env: " + CONDA_ENV_NAME)
     requirements.append("# python: " + CONDA_PYTHON_VERSION)
@@ -856,6 +1090,7 @@ pause
         "pypi_source": pypi_source or "official",
         "selected_model": model_name,
         "project_dir": str(project_dir),
+        "pycharm_exe": str(pycharm_exe) if pycharm_exe else "",
         "basic_packages": BASIC_PACKAGES,
         "export_packages": EXPORT_PACKAGES,
         "hardware_packages": HARDWARE_PACKAGES,
@@ -870,6 +1105,7 @@ pause
     (project_dir / "run_test_yolo.bat").write_text(run_test_bat, encoding="utf-8")
     (project_dir / "requirements_yolo.txt").write_text("\n".join(requirements), encoding="utf-8")
     (project_dir / "install_report.json").write_text(json.dumps(report, indent=2, ensure_ascii=False), encoding="utf-8")
+    write_pycharm_project_files(project_dir, env_python, pycharm_exe)
 
 
 def verify_install(env_python, project_dir):
@@ -928,18 +1164,23 @@ print("测试完成。")
     run_cmd([str(env_python), "-c", code], cwd=project_dir)
 
 
-def print_final(project_dir, conda_path, env_python, model_name):
+def print_final(project_dir, conda_path, env_python, model_name, pycharm_exe=None):
     print_title("部署完成")
     print("YOLO 项目目录：" + str(project_dir))
     print("conda 路径：" + str(conda_path))
     print("conda 环境：" + CONDA_ENV_NAME)
     print("环境 Python：" + str(env_python))
     print("模型：" + model_name)
+    print("PyCharm：" + (str(pycharm_exe) if pycharm_exe else "未检测到 / 未安装"))
 
     print("\n后续使用方法 1：双击/运行")
     print("  " + str(Path(project_dir) / "open_yolo_env.bat"))
 
-    print("\n后续使用方法 2：无需激活，直接调用环境 python")
+    print("\n后续使用方法 2：用 PyCharm 打开项目")
+    print("  " + str(Path(project_dir) / "open_in_pycharm.bat"))
+    print("  或在 PyCharm 中直接打开目录：" + str(project_dir))
+
+    print("\n后续使用方法 3：无需激活，直接调用环境 python")
     print('  cd /d "{}"'.format(project_dir))
     print('  "{}" test_yolo.py'.format(env_python))
     print('  "{}" test_camera.py'.format(env_python))
@@ -948,7 +1189,7 @@ def print_final(project_dir, conda_path, env_python, model_name):
 
 
 def main():
-    print_title("Windows + 完整 Anaconda + YOLO 工程部署工具 V3")
+    print_title("Windows + 完整 Anaconda + YOLO + PyCharm 工程部署工具 V4")
 
     if not is_windows():
         raise RuntimeError("此脚本主要用于 Windows。当前系统不是 Windows。")
@@ -997,6 +1238,7 @@ def main():
     model_desc, model_name = choose_model()
     torch_backend = choose_torch_backend(nvidia_info)
     pypi_source = choose_pypi_source()
+    pycharm_option = choose_pycharm_option()
 
     print_title("安装确认")
     print("项目目录：" + str(project_dir))
@@ -1008,6 +1250,7 @@ def main():
     print("PyTorch 后端：" + torch_backend)
     print("普通包下载源：" + (pypi_source or "官方 PyPI"))
     print("硬件依赖：" + ", ".join(HARDWARE_PACKAGES))
+    print("PyCharm：" + {"configure": "配置项目文件", "install": "安装 Community 并配置", "skip": "跳过"}[pycharm_option])
     ok = input("确认开始安装 YOLO 工具包？[Y/n] 默认 Y：\n> ").strip().lower()
     if ok in ("n", "no"):
         print("用户取消。")
@@ -1024,7 +1267,8 @@ def main():
     }
 
     install_all_packages(env_python, torch_backend, pypi_source)
-    write_project_files(project_dir, conda_path, env_python, model_name, torch_backend, pypi_source, sys_report)
+    pycharm_exe = setup_pycharm(project_dir, pycharm_option)
+    write_project_files(project_dir, conda_path, env_python, model_name, torch_backend, pypi_source, sys_report, pycharm_exe)
     verify_install(env_python, project_dir)
 
     test_now = input("是否现在下载并测试所选 YOLO 模型？[Y/n] 默认 Y：\n> ").strip().lower()
@@ -1036,7 +1280,7 @@ def main():
             print("常见原因：网络无法访问模型下载地址、代理问题、当前 ultralytics 不支持该模型名。")
             print("错误：" + str(e))
 
-    print_final(project_dir, conda_path, env_python, model_name)
+    print_final(project_dir, conda_path, env_python, model_name, pycharm_exe)
 
 
 if __name__ == "__main__":

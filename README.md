@@ -11,6 +11,7 @@ Windows 下的 YOLO 一键部署脚本。它会自动检测系统环境，安装
 - 支持清华 PyPI 镜像或官方 PyPI
 - 支持 YOLOv8、YOLOv9、YOLOv10、YOLO11 常见模型
 - 自动生成测试脚本、环境启动脚本、导出 ONNX 脚本和部署报告
+- 可选安装 PyCharm Community，并生成 PyCharm 项目配置
 - 包含 `pyserial`、`pyrealsense2` 等硬件依赖
 
 ## 运行要求
@@ -36,7 +37,8 @@ python yolo.py
 3. YOLO 模型
 4. PyTorch 后端
 5. Python 包下载源
-6. 是否立即下载并测试模型
+6. 是否安装或配置 PyCharm
+7. 是否立即下载并测试模型
 
 ## 默认路径
 
@@ -54,12 +56,24 @@ C:\Users\Public\YOLO_Anaconda_Deploy
 脚本完成后，会在目标项目目录中生成：
 
 - `open_yolo_env.bat`：打开 YOLO conda 环境
+- `open_in_pycharm.bat`：用 PyCharm 打开当前 YOLO 项目
 - `test_yolo.py`：YOLO 模型测试脚本
 - `test_camera.py`：摄像头测试脚本
 - `test_realsense.py`：Intel RealSense 测试脚本
 - `export_onnx.py`：ONNX 导出脚本
 - `requirements_yolo.txt`：部署环境依赖记录
-- `system_report.json`：系统检测报告
+- `install_report.json`：系统检测和安装报告
+- `.idea/`：PyCharm 项目配置和运行配置
+
+## PyCharm 支持
+
+脚本提供 3 种 PyCharm 选项：
+
+1. 只配置项目文件：适合电脑上已经安装 PyCharm 的情况
+2. 下载并安装 PyCharm Community，然后配置项目文件
+3. 跳过 PyCharm
+
+配置完成后，可以双击目标项目目录里的 `open_in_pycharm.bat`，也可以在 PyCharm 中直接打开目标项目目录。项目配置会指向脚本创建的 conda 环境 Python，并预置 `Run test_yolo` 和 `Export ONNX` 两个运行配置。
 
 ## 常见问题
 
