@@ -1,4 +1,4 @@
-# YOLO One-Click Installer
+# YOLO环境一键部署工具
 
 Windows 下的 YOLO 一键部署脚本。它会自动检测系统环境，安装或复用 Anaconda，创建 `yolo` conda 环境，并安装 Ultralytics YOLO、PyTorch、ONNX 导出工具以及常见硬件依赖。
 
