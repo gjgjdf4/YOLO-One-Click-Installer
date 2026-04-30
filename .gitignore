@@ -1,0 +1,48 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+.venv/
+venv/
+env/
+ENV/
+
+# Build and packaging
+build/
+dist/
+*.egg-info/
+
+# IDE and OS
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Logs and local reports
+*.log
+system_report.json
+
+# YOLO and model artifacts
+*.pt
+*.onnx
+*.engine
+*.tflite
+*.mlpackage
+runs/
+
+# Large installers and archives
+*.exe
+*.msi
+*.zip
+*.7z
+*.rar
+
+# Generated deployment files
+open_yolo_env.bat
+test_yolo.py
+test_camera.py
+test_realsense.py
+export_onnx.py
+requirements_yolo.txt
