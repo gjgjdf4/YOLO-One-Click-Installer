@@ -7,9 +7,10 @@ Windows 下的 YOLO 一键部署脚本。它会自动检测系统环境，安装
 - 自动检测 Windows、Python、CPU、内存、磁盘空间和 NVIDIA 显卡信息
 - 自动安装或复用 Anaconda
 - 自动创建或复用 `yolo` conda 环境
-- 支持 CPU、CUDA 11.8、CUDA 12.6、CUDA 12.8 等 PyTorch 安装源
+- 固定核心依赖版本，降低 PyTorch、Ultralytics、OpenCV、ONNX、RealSense 之间的冲突风险
+- 支持 CPU、CUDA 11.8、CUDA 12.6、CUDA 12.8 等 PyTorch 2.7.0 安装源
 - 支持清华 PyPI 镜像或官方 PyPI
-- 支持 YOLOv8、YOLOv9、YOLOv10、YOLO11 常见模型
+- 支持 YOLOv8、YOLOv9、YOLOv10、YOLO11、YOLO12、YOLO26 常见模型
 - 自动生成测试脚本、环境启动脚本、导出 ONNX 脚本和部署报告
 - 可选安装 PyCharm Community，并生成 PyCharm 项目配置
 - 包含 `pyserial`、`pyrealsense2` 等硬件依赖
@@ -21,6 +22,35 @@ Windows 下的 YOLO 一键部署脚本。它会自动检测系统环境，安装
 - 至少 25GB 可用磁盘空间
 - 网络可访问 Anaconda、PyPI 和 PyTorch 下载源
 - 如果需要 GPU 加速，请先安装 NVIDIA 显卡驱动
+
+## 稳定版本策略
+
+脚本默认使用一套统一稳定环境，优先保证多个 YOLO 版本共用一个 conda 环境：
+
+| 工具 | 固定版本 |
+| --- | --- |
+| Python | 3.10.x |
+| PyTorch | 2.7.0 |
+| torchvision | 0.22.0 |
+| torchaudio | 2.7.0 |
+| ultralytics | 8.4.45 |
+| opencv-python | 4.13.0.92 |
+| onnx | 1.21.0 |
+| onnxruntime | 1.25.1 |
+| pyserial | 3.5 |
+| pyrealsense2 | 2.57.7.10387 |
+
+CUDA 后端仍按 `nvidia-smi` 自动选择：
+
+| nvidia-smi CUDA Version | PyTorch 后端 |
+| --- | --- |
+| 无 NVIDIA / 无 nvidia-smi | CPU |
+| 小于 11.8 | CPU |
+| 11.8 到 12.5 | cu118 |
+| 12.6 到 12.7 | cu126 |
+| 12.8 及以上 | cu128 |
+
+部署完成后，脚本会校验关键包版本，避免安装过程被 pip 自动解析成不一致的版本组合。
 
 ## 快速开始
 

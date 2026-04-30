@@ -13,6 +13,7 @@
 # 8. subprocess 输出解码增加 encoding='utf-8' 和 errors='replace'，防止 Emoji/特殊字符导致崩溃
 # 9. test_realsense.py 增加固件匹配和 RealSense Viewer 校验提醒
 # 10. 新增 PyCharm Community 安装选项，并生成 .idea 项目配置
+# 11. 固定核心依赖版本，优先保证 YOLOv8/9/10/11/12/26 共用一个稳定环境
 #
 # 运行：
 #     python yolo.py
@@ -34,6 +35,7 @@ from xml.sax.saxutils import escape as xml_escape
 
 CONDA_ENV_NAME = "yolo"
 CONDA_PYTHON_VERSION = "3.10"
+DEPLOY_PROFILE = "stable-2026-yolo-multi-version"
 
 PROJECT_NAME = "YOLO_Anaconda_Deploy"
 DEFAULT_ANACONDA_DIR = r"C:\Users\Public\Anaconda3_YOLO"
@@ -49,7 +51,21 @@ DOWNLOAD_RETRIES = 3
 DOWNLOAD_RETRY_SLEEP = 5
 DOWNLOAD_TIMEOUT = 30
 
-TORCH_PACKAGES = ["torch", "torchvision", "torchaudio"]
+TORCH_VERSION = "2.7.0"
+TORCHVISION_VERSION = "0.22.0"
+TORCHAUDIO_VERSION = "2.7.0"
+ULTRALYTICS_VERSION = "8.4.45"
+OPENCV_VERSION = "4.13.0.92"
+ONNX_VERSION = "1.21.0"
+ONNXRUNTIME_VERSION = "1.25.1"
+PYSERIAL_VERSION = "3.5"
+PYREALSENSE2_VERSION = "2.57.7.10387"
+
+TORCH_PACKAGES = [
+    "torch==" + TORCH_VERSION,
+    "torchvision==" + TORCHVISION_VERSION,
+    "torchaudio==" + TORCHAUDIO_VERSION,
+]
 
 TORCH_INDEX = {
     "cpu": "https://download.pytorch.org/whl/cpu",
@@ -59,9 +75,9 @@ TORCH_INDEX = {
 }
 
 BASIC_PACKAGES = [
-    "ultralytics",
-    "opencv-python",
-    "numpy",
+    "ultralytics==" + ULTRALYTICS_VERSION,
+    "opencv-python==" + OPENCV_VERSION,
+    "numpy>=1.23,<2.3",
     "pillow",
     "matplotlib",
     "pandas",
@@ -73,15 +89,15 @@ BASIC_PACKAGES = [
 ]
 
 EXPORT_PACKAGES = [
-    "onnx",
-    "onnxruntime",
+    "onnx==" + ONNX_VERSION,
+    "onnxruntime==" + ONNXRUNTIME_VERSION,
     "onnxsim",
 ]
 
 # 统一硬件驱动依赖组：后续要加雷达、机械臂 SDK，也统一放这里
 HARDWARE_PACKAGES = [
-    "pyserial",
-    "pyrealsense2",
+    "pyserial==" + PYSERIAL_VERSION,
+    "pyrealsense2==" + PYREALSENSE2_VERSION,
 ]
 
 YOLO_MODEL_MENU = {
@@ -96,7 +112,11 @@ YOLO_MODEL_MENU = {
     "9": ("YOLO11n  推荐，轻量稳定", "yolo11n.pt"),
     "10": ("YOLO11s 推荐，速度和精度均衡", "yolo11s.pt"),
     "11": ("YOLO11m 中等模型，建议有显卡", "yolo11m.pt"),
-    "12": ("自定义模型路径，例如 best.pt", "CUSTOM"),
+    "12": ("YOLO12n 注意力结构研究，显存压力略高", "yolo12n.pt"),
+    "13": ("YOLO12s YOLO12 小模型", "yolo12s.pt"),
+    "14": ("YOLO26n 边缘端/CPU 推理方向，轻量", "yolo26n.pt"),
+    "15": ("YOLO26s 边缘端/实时检测方向，小模型", "yolo26s.pt"),
+    "16": ("自定义模型路径，例如 best.pt", "CUSTOM"),
 }
 
 
@@ -728,13 +748,16 @@ def choose_torch_backend(nvidia_info):
         except Exception:
             auto_choice = "cu118"
 
+    print("固定版本：torch {} / torchvision {} / torchaudio {}".format(
+        TORCH_VERSION, TORCHVISION_VERSION, TORCHAUDIO_VERSION
+    ))
     print("自动建议：" + auto_choice)
     print("1. 自动选择")
     print("2. CPU 版，兼容最好但速度慢")
     print("3. CUDA 11.8 版")
     print("4. CUDA 12.6 版")
     print("5. CUDA 12.8 版")
-    print("6. 跳过 PyTorch 安装")
+    print("6. 跳过 PyTorch 安装（仅限已有 torch {}，高级选项）".format(TORCH_VERSION))
 
     c = input("请选择 [1/2/3/4/5/6]，默认 1：\n> ").strip() or "1"
     if c == "1":
@@ -768,12 +791,35 @@ def pip_install(env_python, packages, pypi_source=None, extra_args=None, group_n
         return
 
     print_step("安装 " + group_name)
-    cmd = [str(env_python), "-m", "pip", "install", "--default-timeout=1000"] + list(packages)
+    cmd = [
+        str(env_python),
+        "-m",
+        "pip",
+        "install",
+        "--default-timeout=1000",
+        "--retries",
+        "5",
+        "--prefer-binary",
+        "--upgrade-strategy",
+        "only-if-needed",
+    ] + list(packages)
     if pypi_source:
         cmd += ["-i", pypi_source]
     if extra_args:
         cmd += list(extra_args)
     run_cmd(cmd)
+
+
+def verify_existing_torch_version(env_python):
+    code = '''
+import torch
+expected = "{expected}"
+current = torch.__version__.split("+")[0]
+print("existing torch:", torch.__version__)
+if current != expected:
+    raise SystemExit("已有 torch 版本不是 {expected}，为避免环境冲突，请不要跳过 PyTorch 安装。")
+'''.format(expected=TORCH_VERSION)
+    run_cmd([str(env_python), "-c", code])
 
 
 def install_all_packages(env_python, torch_backend, pypi_source):
@@ -792,7 +838,8 @@ def install_all_packages(env_python, torch_backend, pypi_source):
             group_name="PyTorch " + torch_backend,
         )
     else:
-        print("跳过 PyTorch 安装。")
+        print("跳过 PyTorch 安装，开始校验已有 torch 版本。")
+        verify_existing_torch_version(env_python)
 
     pip_install(env_python, BASIC_PACKAGES, pypi_source, group_name="YOLO 基础依赖")
     pip_install(env_python, EXPORT_PACKAGES, pypi_source, group_name="ONNX 导出/部署依赖")
@@ -1065,6 +1112,7 @@ pause
     requirements = []
     requirements.append("# YOLO Anaconda full deployment V4")
     requirements.append("# generated at " + datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+    requirements.append("# deploy profile: " + DEPLOY_PROFILE)
     requirements.append("# conda env: " + CONDA_ENV_NAME)
     requirements.append("# python: " + CONDA_PYTHON_VERSION)
     requirements.append("# torch backend: " + torch_backend)
@@ -1086,7 +1134,20 @@ pause
         "conda_path": str(conda_path),
         "conda_env": CONDA_ENV_NAME,
         "env_python": str(env_python),
+        "deploy_profile": DEPLOY_PROFILE,
         "torch_backend": torch_backend,
+        "pinned_versions": {
+            "python": CONDA_PYTHON_VERSION,
+            "torch": TORCH_VERSION,
+            "torchvision": TORCHVISION_VERSION,
+            "torchaudio": TORCHAUDIO_VERSION,
+            "ultralytics": ULTRALYTICS_VERSION,
+            "opencv-python": OPENCV_VERSION,
+            "onnx": ONNX_VERSION,
+            "onnxruntime": ONNXRUNTIME_VERSION,
+            "pyserial": PYSERIAL_VERSION,
+            "pyrealsense2": PYREALSENSE2_VERSION,
+        },
         "pypi_source": pypi_source or "official",
         "selected_model": model_name,
         "project_dir": str(project_dir),
@@ -1110,14 +1171,48 @@ pause
 
 def verify_install(env_python, project_dir):
     print_title("验证安装")
+    print_step("检查 pip 依赖冲突")
+    run_cmd([str(env_python), "-m", "pip", "check"], cwd=project_dir)
+
     code = r'''
 import sys
+import importlib.metadata as metadata
 import torch
 import cv2
 import ultralytics
 
+EXPECTED = {
+    "torch": "__TORCH_VERSION__",
+    "torchvision": "__TORCHVISION_VERSION__",
+    "torchaudio": "__TORCHAUDIO_VERSION__",
+    "ultralytics": "__ULTRALYTICS_VERSION__",
+    "opencv-python": "__OPENCV_VERSION__",
+    "onnx": "__ONNX_VERSION__",
+    "onnxruntime": "__ONNXRUNTIME_VERSION__",
+    "pyserial": "__PYSERIAL_VERSION__",
+    "pyrealsense2": "__PYREALSENSE2_VERSION__",
+}
+
+def dist_version(name):
+    return metadata.version(name)
+
+def assert_dist(name):
+    current = dist_version(name)
+    expected = EXPECTED[name]
+    print("{}: {}".format(name, current))
+    if current != expected:
+        raise RuntimeError("{} 版本不匹配，期望 {}，实际 {}".format(name, expected, current))
+
 print("Python:", sys.version)
-print("torch:", torch.__version__)
+assert_dist("torch")
+assert_dist("torchvision")
+assert_dist("torchaudio")
+assert_dist("ultralytics")
+assert_dist("opencv-python")
+assert_dist("onnx")
+assert_dist("onnxruntime")
+assert_dist("pyserial")
+assert_dist("pyrealsense2")
 print("torch cuda available:", torch.cuda.is_available())
 print("torch cuda version:", torch.version.cuda)
 if torch.cuda.is_available():
@@ -1138,6 +1233,17 @@ except Exception as e:
     print("pyrealsense2: FAIL", e)
     raise
 '''
+    code = (
+        code.replace("__TORCH_VERSION__", TORCH_VERSION)
+        .replace("__TORCHVISION_VERSION__", TORCHVISION_VERSION)
+        .replace("__TORCHAUDIO_VERSION__", TORCHAUDIO_VERSION)
+        .replace("__ULTRALYTICS_VERSION__", ULTRALYTICS_VERSION)
+        .replace("__OPENCV_VERSION__", OPENCV_VERSION)
+        .replace("__ONNX_VERSION__", ONNX_VERSION)
+        .replace("__ONNXRUNTIME_VERSION__", ONNXRUNTIME_VERSION)
+        .replace("__PYSERIAL_VERSION__", PYSERIAL_VERSION)
+        .replace("__PYREALSENSE2_VERSION__", PYREALSENSE2_VERSION)
+    )
     run_cmd([str(env_python), "-c", code], cwd=project_dir)
 
 
@@ -1170,6 +1276,7 @@ def print_final(project_dir, conda_path, env_python, model_name, pycharm_exe=Non
     print("conda 路径：" + str(conda_path))
     print("conda 环境：" + CONDA_ENV_NAME)
     print("环境 Python：" + str(env_python))
+    print("部署策略：" + DEPLOY_PROFILE)
     print("模型：" + model_name)
     print("PyCharm：" + (str(pycharm_exe) if pycharm_exe else "未检测到 / 未安装"))
 
@@ -1246,8 +1353,16 @@ def main():
     print("环境名：" + CONDA_ENV_NAME)
     print("环境 Python：" + str(env_python))
     print("Python：" + CONDA_PYTHON_VERSION)
+    print("部署策略：" + DEPLOY_PROFILE)
     print("YOLO 模型：" + model_name)
     print("PyTorch 后端：" + torch_backend)
+    print("PyTorch 固定版本：torch {} / torchvision {} / torchaudio {}".format(
+        TORCH_VERSION, TORCHVISION_VERSION, TORCHAUDIO_VERSION
+    ))
+    print("YOLO 核心版本：ultralytics {} / opencv-python {}".format(
+        ULTRALYTICS_VERSION, OPENCV_VERSION
+    ))
+    print("ONNX 版本：onnx {} / onnxruntime {}".format(ONNX_VERSION, ONNXRUNTIME_VERSION))
     print("普通包下载源：" + (pypi_source or "官方 PyPI"))
     print("硬件依赖：" + ", ".join(HARDWARE_PACKAGES))
     print("PyCharm：" + {"configure": "配置项目文件", "install": "安装 Community 并配置", "skip": "跳过"}[pycharm_option])
