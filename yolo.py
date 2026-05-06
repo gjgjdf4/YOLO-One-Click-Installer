@@ -50,6 +50,7 @@ DEFAULT_PYCHARM_DIR = r"C:\Users\Public\PyCharm_Community"
 DOWNLOAD_RETRIES = 3
 DOWNLOAD_RETRY_SLEEP = 5
 DOWNLOAD_TIMEOUT = 30
+INSTALLER_CACHE_MIN_BYTES = 100 * 1024 * 1024
 
 TORCH_VERSION = "2.7.0"
 TORCHVISION_VERSION = "0.22.0"
@@ -410,10 +411,10 @@ def download_file_with_retry(url, dst):
         urls.append(fallback_url)
 
     last_error = None
-    for current_url in urls:
+    for url_index, current_url in enumerate(urls):
         for attempt in range(1, DOWNLOAD_RETRIES + 1):
             try:
-                if dst.exists() and dst.stat().st_size > 100 * 1024 * 1024:
+                if dst.exists() and dst.stat().st_size > INSTALLER_CACHE_MIN_BYTES:
                     print("检测到本地已有安装包，跳过下载：" + str(dst))
                     return
 
@@ -467,8 +468,8 @@ def download_file_with_retry(url, dst):
                     print("{} 秒后重试。".format(DOWNLOAD_RETRY_SLEEP))
                     time.sleep(DOWNLOAD_RETRY_SLEEP)
 
-        if len(urls) > 1:
-            print("\n切换下载源重试...")
+        if url_index < len(urls) - 1:
+            print("\n当前下载源多次失败，切换备用下载源重试...")
 
     raise RuntimeError("文件下载失败：" + str(last_error))
 
