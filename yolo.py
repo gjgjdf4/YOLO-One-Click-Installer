@@ -184,7 +184,6 @@ def run_cmd(cmd, check=True, capture=False, cwd=None):
         encoding="utf-8",
         errors="replace",
         bufsize=1,
-        universal_newlines=True,
     )
 
     if process.stdout:
@@ -405,67 +404,71 @@ def download_file_with_retry(url, dst):
     dst = Path(dst)
     dst.parent.mkdir(parents=True, exist_ok=True)
 
-    last_error = None
-    for attempt in range(1, DOWNLOAD_RETRIES + 1):
-        try:
-            if dst.exists() and dst.stat().st_size > 100 * 1024 * 1024:
-                print("检测到本地已有安装包，跳过下载：" + str(dst))
-                return
-
-            temp = dst.with_suffix(dst.suffix + ".part")
-            if temp.exists():
-                temp.unlink()
-
-            print("\n下载地址：" + url)
-            print("保存到：" + str(dst))
-            print("第 {}/{} 次下载".format(attempt, DOWNLOAD_RETRIES))
-
-            req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-            with urllib.request.urlopen(req, timeout=DOWNLOAD_TIMEOUT) as resp:
-                total = resp.headers.get("Content-Length")
-                total = int(total) if total and total.isdigit() else 0
-                done = 0
-                t0 = time.time()
-
-                with open(temp, "wb") as f:
-                    while True:
-                        chunk = resp.read(1024 * 1024)
-                        if not chunk:
-                            break
-                        f.write(chunk)
-                        done += len(chunk)
-
-                        if total:
-                            percent = done * 100 / total
-                            mb_done = done / (1024 * 1024)
-                            mb_total = total / (1024 * 1024)
-                            elapsed = max(time.time() - t0, 0.1)
-                            speed = mb_done / elapsed
-                            sys.stdout.write(
-                                "\r进度：{:.1f}%  {:.1f}/{:.1f} MB  {:.1f} MB/s".format(
-                                    percent, mb_done, mb_total, speed
-                                )
-                            )
-                            sys.stdout.flush()
-
-            if total and temp.stat().st_size < total:
-                raise RuntimeError("下载文件大小不完整。")
-
-            temp.replace(dst)
-            print("\n下载完成。")
-            return
-
-        except Exception as e:
-            last_error = e
-            print("\n下载失败，第 {}/{} 次：{}".format(attempt, DOWNLOAD_RETRIES, e))
-            if attempt < DOWNLOAD_RETRIES:
-                print("{} 秒后重试。".format(DOWNLOAD_RETRY_SLEEP))
-                time.sleep(DOWNLOAD_RETRY_SLEEP)
-
+    urls = [url]
     if url.startswith(TUNA_ANACONDA_ARCHIVE_URL):
         fallback_url = url.replace(TUNA_ANACONDA_ARCHIVE_URL, OFFICIAL_ANACONDA_ARCHIVE_URL)
-        print("\n清华源多次失败，尝试官方源兜底：")
-        return download_file_with_retry(fallback_url, dst)
+        urls.append(fallback_url)
+
+    last_error = None
+    for current_url in urls:
+        for attempt in range(1, DOWNLOAD_RETRIES + 1):
+            try:
+                if dst.exists() and dst.stat().st_size > 100 * 1024 * 1024:
+                    print("检测到本地已有安装包，跳过下载：" + str(dst))
+                    return
+
+                temp = dst.with_suffix(dst.suffix + ".part")
+                if temp.exists():
+                    temp.unlink()
+
+                print("\n下载地址：" + current_url)
+                print("保存到：" + str(dst))
+                print("第 {}/{} 次下载".format(attempt, DOWNLOAD_RETRIES))
+
+                req = urllib.request.Request(current_url, headers={"User-Agent": "Mozilla/5.0"})
+                with urllib.request.urlopen(req, timeout=DOWNLOAD_TIMEOUT) as resp:
+                    total = resp.headers.get("Content-Length")
+                    total = int(total) if total and total.isdigit() else 0
+                    done = 0
+                    t0 = time.time()
+
+                    with open(temp, "wb") as f:
+                        while True:
+                            chunk = resp.read(1024 * 1024)
+                            if not chunk:
+                                break
+                            f.write(chunk)
+                            done += len(chunk)
+
+                            if total:
+                                percent = done * 100 / total
+                                mb_done = done / (1024 * 1024)
+                                mb_total = total / (1024 * 1024)
+                                elapsed = max(time.time() - t0, 0.1)
+                                speed = mb_done / elapsed
+                                sys.stdout.write(
+                                    "\r进度：{:.1f}%  {:.1f}/{:.1f} MB  {:.1f} MB/s".format(
+                                        percent, mb_done, mb_total, speed
+                                    )
+                                )
+                                sys.stdout.flush()
+
+                if total and temp.stat().st_size < total:
+                    raise RuntimeError("下载文件大小不完整。")
+
+                temp.replace(dst)
+                print("\n下载完成。")
+                return
+
+            except Exception as e:
+                last_error = e
+                print("\n下载失败，第 {}/{} 次：{}".format(attempt, DOWNLOAD_RETRIES, e))
+                if attempt < DOWNLOAD_RETRIES:
+                    print("{} 秒后重试。".format(DOWNLOAD_RETRY_SLEEP))
+                    time.sleep(DOWNLOAD_RETRY_SLEEP)
+
+        if len(urls) > 1:
+            print("\n切换下载源重试...")
 
     raise RuntimeError("文件下载失败：" + str(last_error))
 

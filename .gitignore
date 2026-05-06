@@ -4,10 +4,13 @@ __pycache__/
 *.pyo
 *.pyd
 .Python
+.python-version
 .venv/
 venv/
 env/
 ENV/
+pip-log.txt
+pip-delete-this-directory.txt
 
 # Build and packaging
 build/
